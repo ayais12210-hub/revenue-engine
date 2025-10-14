@@ -16,6 +16,7 @@ from flask_cors import CORS
 import stripe
 import requests
 from prisma import Prisma
+from api.utils.copykit_parser import parse_copykit_html
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -643,38 +644,21 @@ def get_copykit_data():
         response = requests.get('https://copykit-gv4rmq.manus.space', timeout=10)
         response.raise_for_status()
         
-        # Parse the HTML to extract relevant data
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Parse the HTML using the shared utility
+        parsed_data = parse_copykit_html(response.text)
         
-        # Extract global environment variables
-        script_tags = soup.find_all('script')
-        global_env = {}
-        
-        for script in script_tags:
-            if script.string and '__manus__global_env' in script.string:
-                # Extract the global environment object
-                import re
-                env_match = re.search(r'__manus__global_env\s*=\s*({[^}]+})', script.string)
-                if env_match:
-                    try:
-                        global_env = json.loads(env_match.group(1))
-                    except json.JSONDecodeError:
-                        pass
-                break
-        
-        # Extract metadata
-        title = soup.title.string if soup.title else 'CopyKit - AI-Powered Copywriting That Converts'
-        meta_description_tag = soup.find('meta', attrs={'name': 'description'})
-        meta_description = meta_description_tag.get('content') if meta_description_tag else None
+        # Check if parsing was successful
+        if 'error' in parsed_data:
+            app.logger.error(f"Error parsing CopyKit HTML: {parsed_data['error']}")
+            return jsonify({'error': 'Failed to parse CopyKit data'}), 500
         
         # Return structured data
         return jsonify({
             'status': 'success',
             'data': {
-                'global_env': global_env,
-                'title': title,
-                'meta_description': meta_description,
+                'global_env': parsed_data['global_env'],
+                'title': parsed_data['title'] or 'CopyKit - AI-Powered Copywriting That Converts',
+                'meta_description': parsed_data['meta_description'],
                 'last_updated': datetime.utcnow().isoformat()
             }
         }), 200

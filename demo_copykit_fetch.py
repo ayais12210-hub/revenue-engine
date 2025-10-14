@@ -6,9 +6,13 @@ This script shows how the API endpoints work with the CopyKit URL
 
 import requests
 import json
-import re
-from bs4 import BeautifulSoup
+import sys
+import os
 from datetime import datetime
+
+# Add the api directory to the Python path so we can import the utility
+sys.path.append(os.path.join(os.path.dirname(__file__), 'api'))
+from utils.copykit_parser import parse_copykit_html
 
 def fetch_copykit_data():
     """Fetch and parse data from CopyKit URL"""
@@ -18,37 +22,24 @@ def fetch_copykit_data():
         response = requests.get('https://copykit-gv4rmq.manus.space', timeout=10)
         response.raise_for_status()
         
-        # Parse HTML
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Parse HTML using the shared utility
+        parsed_data = parse_copykit_html(response.text)
         
-        # Extract global environment variables
-        script_tags = soup.find_all('script')
-        global_env = {}
-        
-        for script in script_tags:
-            if script.string and '__manus__global_env' in script.string:
-                # Extract the global environment object
-                env_match = re.search(r'__manus__global_env\s*=\s*({[^}]+})', script.string)
-                if env_match:
-                    try:
-                        global_env = json.loads(env_match.group(1))
-                    except json.JSONDecodeError:
-                        pass
-                break
-        
-        # Extract metadata
-        title = soup.title.string if soup.title else 'CopyKit - AI-Powered Copywriting That Converts'
-        meta_description_tag = soup.find('meta', attrs={'name': 'description'})
-        meta_description = meta_description_tag.get('content') if meta_description_tag else None
+        # Check if parsing was successful
+        if 'error' in parsed_data:
+            return {
+                'status': 'error',
+                'error': parsed_data['error']
+            }
         
         return {
             'status': 'success',
             'data': {
-                'global_env': global_env,
-                'title': title,
-                'meta_description': meta_description,
+                'global_env': parsed_data['global_env'],
+                'title': parsed_data['title'] or 'CopyKit - AI-Powered Copywriting That Converts',
+                'meta_description': parsed_data['meta_description'],
                 'last_updated': datetime.utcnow().isoformat(),
-                'content_length': len(response.text)
+                'content_length': parsed_data['content_length']
             }
         }
         
