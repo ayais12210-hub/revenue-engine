@@ -6,4 +6,5 @@ requests==2.31.0
 python-dotenv==1.0.0
 gunicorn==21.2.0
 sentry-sdk[flask]==1.39.1
+beautifulsoup4==4.12.2
 

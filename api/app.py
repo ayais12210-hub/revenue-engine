@@ -632,6 +632,127 @@ def create_lead():
         return jsonify({'error': str(e)}), 400
 
 # ============================================================
+# COPYKIT DATA FETCHING
+# ============================================================
+
+@app.route('/api/copykit/data', methods=['GET'])
+def get_copykit_data():
+    """Fetch data from CopyKit URL and return structured data"""
+    try:
+        # Fetch data from the CopyKit URL
+        response = requests.get('https://copykit-gv4rmq.manus.space', timeout=10)
+        response.raise_for_status()
+        
+        # Parse the HTML to extract relevant data
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Extract global environment variables
+        script_tags = soup.find_all('script')
+        global_env = {}
+        
+        for script in script_tags:
+            if script.string and '__manus__global_env' in script.string:
+                # Extract the global environment object
+                import re
+                env_match = re.search(r'__manus__global_env\s*=\s*({[^}]+})', script.string)
+                if env_match:
+                    try:
+                        global_env = json.loads(env_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+                break
+        
+        # Return structured data
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'global_env': global_env,
+                'title': soup.title.string if soup.title else 'CopyKit - AI-Powered Copywriting That Converts',
+                'meta_description': soup.find('meta', attrs={'name': 'description'}),
+                'last_updated': datetime.utcnow().isoformat()
+            }
+        }), 200
+        
+    except requests.RequestException as e:
+        app.logger.error(f"Error fetching CopyKit data: {e}")
+        return jsonify({'error': 'Failed to fetch data from CopyKit URL'}), 500
+    except Exception as e:
+        app.logger.error(f"Error processing CopyKit data: {e}")
+        return jsonify({'error': 'Failed to process data'}), 500
+
+@app.route('/api/copykit/products', methods=['GET'])
+def get_copykit_products():
+    """Get CopyKit product data with real-time pricing and availability"""
+    try:
+        # Get products from database
+        products = db.product.find_many()
+        
+        # Format products for frontend
+        formatted_products = []
+        for product in products:
+            formatted_products.append({
+                'id': product.sku.lower().replace('-', '_'),
+                'name': product.name,
+                'price': f"£{product.priceGbp}",
+                'period': '/month' if product.type == 'subscription' else 'one-time',
+                'sku': product.sku,
+                'description': product.description,
+                'features': product.features or [],
+                'popular': product.sku == 'COPYKIT-MONTHLY',  # Mark monthly as popular
+                'available': product.active
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'products': formatted_products
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching products: {e}")
+        return jsonify({'error': 'Failed to fetch products'}), 500
+
+@app.route('/api/copykit/analytics', methods=['GET'])
+def get_copykit_analytics():
+    """Get CopyKit analytics and performance data"""
+    try:
+        # Get recent KPIs
+        recent_kpis = db.kpidaily.find_many(
+            order={'date': 'desc'},
+            take=30
+        )
+        
+        # Calculate totals
+        total_visitors = sum(kpi.visitors for kpi in recent_kpis)
+        total_leads = sum(kpi.leads for kpi in recent_kpis)
+        total_orders = sum(kpi.orders for kpi in recent_kpis)
+        total_revenue = sum(float(kpi.grossGbp) for kpi in recent_kpis)
+        
+        # Get recent orders
+        recent_orders = db.order.find_many(
+            order={'createdAt': 'desc'},
+            take=10
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'analytics': {
+                'totals': {
+                    'visitors': total_visitors,
+                    'leads': total_leads,
+                    'orders': total_orders,
+                    'revenue': total_revenue
+                },
+                'recent_orders': [order.dict() for order in recent_orders],
+                'kpi_trend': [kpi.dict() for kpi in recent_kpis]
+            }
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching analytics: {e}")
+        return jsonify({'error': 'Failed to fetch analytics'}), 500
+
+# ============================================================
 # KPI ENDPOINTS
 # ============================================================
 
