@@ -38,14 +38,15 @@ def fetch_copykit_data():
         
         # Extract metadata
         title = soup.title.string if soup.title else 'CopyKit - AI-Powered Copywriting That Converts'
-        meta_description = soup.find('meta', attrs={'name': 'description'})
+        meta_description_tag = soup.find('meta', attrs={'name': 'description'})
+        meta_description = meta_description_tag.get('content') if meta_description_tag else None
         
         return {
             'status': 'success',
             'data': {
                 'global_env': global_env,
                 'title': title,
-                'meta_description': str(meta_description) if meta_description else None,
+                'meta_description': meta_description,
                 'last_updated': datetime.utcnow().isoformat(),
                 'content_length': len(response.text)
             }

@@ -663,13 +663,18 @@ def get_copykit_data():
                         pass
                 break
         
+        # Extract metadata
+        title = soup.title.string if soup.title else 'CopyKit - AI-Powered Copywriting That Converts'
+        meta_description_tag = soup.find('meta', attrs={'name': 'description'})
+        meta_description = meta_description_tag.get('content') if meta_description_tag else None
+        
         # Return structured data
         return jsonify({
             'status': 'success',
             'data': {
                 'global_env': global_env,
-                'title': soup.title.string if soup.title else 'CopyKit - AI-Powered Copywriting That Converts',
-                'meta_description': soup.find('meta', attrs={'name': 'description'}),
+                'title': title,
+                'meta_description': meta_description,
                 'last_updated': datetime.utcnow().isoformat()
             }
         }), 200

@@ -39,7 +39,7 @@ Fetches and parses data from the CopyKit URL.
       "amplitudeKey": "46ac3f9abb41dd2d17a5785e052bc6d3"
     },
     "title": "CopyKit - AI-Powered Copywriting That Converts",
-    "meta_description": "<meta name=\"description\" content=\"...\">",
+    "meta_description": "AI-powered copywriting tool for modern marketers",
     "last_updated": "2025-10-14T17:00:30.432395"
   }
 }
@@ -325,7 +325,12 @@ prisma==0.11.0
    - Check API server status
    - Review browser console for errors
 
-3. **Styling Issues:**
+3. **JSON Serialization Errors:**
+   - Fixed: Meta description tags are now properly serialized as strings
+   - The API extracts `content` attribute from meta tags instead of returning Tag objects
+   - Both cases (with/without meta description) are handled correctly
+
+4. **Styling Issues:**
    - Ensure Tailwind CSS is properly loaded
    - Check component imports
    - Verify responsive design classes
