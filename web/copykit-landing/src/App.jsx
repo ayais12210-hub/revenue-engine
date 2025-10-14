@@ -2,11 +2,14 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button.jsx'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card.jsx'
 import { Badge } from '@/components/ui/badge.jsx'
-import { Check, Sparkles, Zap, TrendingUp, Mail, FileText, Target, ArrowRight, Star } from 'lucide-react'
+import { Check, Sparkles, Zap, TrendingUp, Mail, FileText, Target, ArrowRight, Star, Loader2 } from 'lucide-react'
+import { useProducts, useAnalytics } from './hooks/useCopyKitData.js'
 import './App.css'
 
 function App() {
   const [selectedPlan, setSelectedPlan] = useState(null)
+  const { products, loading: productsLoading, error: productsError } = useProducts()
+  const { analytics, loading: analyticsLoading } = useAnalytics()
 
   const features = [
     {
@@ -31,7 +34,8 @@ function App() {
     }
   ]
 
-  const plans = [
+  // Use dynamic products from API, fallback to hardcoded if loading/error
+  const plans = products.length > 0 ? products : [
     {
       id: 'monthly',
       name: 'CopyKit Monthly',
@@ -47,7 +51,8 @@ function App() {
         'Priority support',
         'Brand voice customization'
       ],
-      popular: true
+      popular: true,
+      available: true
     },
     {
       id: 'bundle',
@@ -64,7 +69,8 @@ function App() {
         'Competitor analysis',
         'Lifetime access'
       ],
-      popular: false
+      popular: false,
+      available: true
     },
     {
       id: 'briefing',
@@ -81,7 +87,8 @@ function App() {
         'Trading & creator niches',
         'Archive access'
       ],
-      popular: false
+      popular: false,
+      available: true
     }
   ]
 
@@ -231,42 +238,84 @@ function App() {
             <div className="text-center space-y-4 mb-16">
               <h2 className="text-3xl md:text-4xl font-bold">Choose Your Growth Plan</h2>
               <p className="text-xl text-muted-foreground">Simple, transparent pricing that scales with your business</p>
+              {analytics && (
+                <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4" />
+                    <span>{analytics.totals?.orders || 0} orders</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Star className="w-4 h-4" />
+                    <span>£{analytics.totals?.revenue || 0} revenue</span>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="grid md:grid-cols-3 gap-8">
-              {plans.map((plan) => (
-                <Card key={plan.id} className={`relative ${plan.popular ? 'border-primary shadow-lg scale-105' : ''}`}>
-                  {plan.popular && (
-                    <Badge className="absolute -top-3 left-1/2 -translate-x-1/2">Most Popular</Badge>
-                  )}
-                  <CardHeader>
-                    <CardTitle className="text-2xl">{plan.name}</CardTitle>
-                    <CardDescription>{plan.description}</CardDescription>
-                    <div className="mt-4">
-                      <span className="text-4xl font-bold">{plan.price}</span>
-                      <span className="text-muted-foreground">{plan.period}</span>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-3">
-                      {plan.features.map((feature, index) => (
-                        <li key={index} className="flex items-start gap-2">
-                          <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                          <span className="text-sm">{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                  <CardFooter>
-                    <Button 
-                      className="w-full" 
-                      variant={plan.popular ? "default" : "outline"}
-                      onClick={() => handleCheckout(plan)}
-                    >
-                      {plan.period === 'one-time' ? 'Buy Now' : 'Start Free Trial'}
-                    </Button>
-                  </CardFooter>
-                </Card>
-              ))}
+              {productsLoading ? (
+                // Loading state
+                Array.from({ length: 3 }).map((_, index) => (
+                  <Card key={index} className="relative">
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span className="text-muted-foreground">Loading...</span>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                          <div key={i} className="h-4 bg-muted rounded animate-pulse" />
+                        ))}
+                      </div>
+                    </CardContent>
+                    <CardFooter>
+                      <Button className="w-full" disabled>
+                        Loading...
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                ))
+              ) : (
+                plans.map((plan) => (
+                  <Card key={plan.id} className={`relative ${plan.popular ? 'border-primary shadow-lg scale-105' : ''} ${!plan.available ? 'opacity-50' : ''}`}>
+                    {plan.popular && (
+                      <Badge className="absolute -top-3 left-1/2 -translate-x-1/2">Most Popular</Badge>
+                    )}
+                    {!plan.available && (
+                      <Badge variant="secondary" className="absolute -top-3 right-4">Unavailable</Badge>
+                    )}
+                    <CardHeader>
+                      <CardTitle className="text-2xl">{plan.name}</CardTitle>
+                      <CardDescription>{plan.description}</CardDescription>
+                      <div className="mt-4">
+                        <span className="text-4xl font-bold">{plan.price}</span>
+                        <span className="text-muted-foreground">{plan.period}</span>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-3">
+                        {plan.features.map((feature, index) => (
+                          <li key={index} className="flex items-start gap-2">
+                            <Check className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
+                            <span className="text-sm">{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </CardContent>
+                    <CardFooter>
+                      <Button 
+                        className="w-full" 
+                        variant={plan.popular ? "default" : "outline"}
+                        onClick={() => handleCheckout(plan)}
+                        disabled={!plan.available}
+                      >
+                        {!plan.available ? 'Unavailable' : plan.period === 'one-time' ? 'Buy Now' : 'Start Free Trial'}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                ))
+              )}
             </div>
           </div>
         </div>
