@@ -1,0 +1,264 @@
+// Omni-Revenue-Agent Prisma Schema
+// This schema is compatible with PostgreSQL/Supabase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique @db.VarChar(255)
+  name      String?  @db.VarChar(255)
+  source    LeadSource?
+  tags      String[]
+  
+  // UTM tracking
+  utmSource   String? @map("utm_source") @db.VarChar(255)
+  utmCampaign String? @map("utm_campaign") @db.VarChar(255)
+  utmMedium   String? @map("utm_medium") @db.VarChar(255)
+  utmTerm     String? @map("utm_term") @db.VarChar(255)
+  utmContent  String? @map("utm_content") @db.VarChar(255)
+  
+  // Enrichment data
+  enrichmentCompany  String? @map("enrichment_company") @db.VarChar(255)
+  enrichmentRole     String? @map("enrichment_role") @db.VarChar(255)
+  enrichmentLinkedin String? @map("enrichment_linkedin") @db.VarChar(500)
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  
+  @@index([email])
+  @@index([source])
+  @@index([createdAt(sort: Desc)])
+  @@index([utmCampaign])
+  @@map("leads")
+}
+
+model Product {
+  sku               String   @id @db.VarChar(100)
+  title             String   @db.VarChar(255)
+  type              ProductType
+  priceGbp          Decimal  @map("price_gbp") @db.Decimal(10, 2)
+  paymentGateways   String[] @map("payment_gateways")
+  fulfilmentWebhook String?  @map("fulfilment_webhook") @db.VarChar(500)
+  description       String?  @db.Text
+  active            Boolean  @default(true)
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  
+  orders         Order[]
+  subscriptions  Subscription[]
+  contentAssets  ContentAsset[]
+  
+  @@index([type])
+  @@index([active])
+  @@map("products")
+}
+
+model Order {
+  id                   String      @id @default(uuid()) @db.Uuid
+  gateway              PaymentGateway
+  gatewayTransactionId String?     @unique @map("gateway_transaction_id") @db.VarChar(255)
+  status               OrderStatus
+  amountGbp            Decimal     @map("amount_gbp") @db.Decimal(10, 2)
+  buyerEmail           String      @map("buyer_email") @db.VarChar(255)
+  buyerName            String?     @map("buyer_name") @db.VarChar(255)
+  sku                  String      @db.VarChar(100)
+  
+  metadata             Json?       @db.JsonB
+  
+  fulfilled            Boolean     @default(false)
+  fulfilledAt          DateTime?   @map("fulfilled_at") @db.Timestamptz(6)
+  
+  createdAt            DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  
+  product              Product     @relation(fields: [sku], references: [sku])
+  
+  @@index([gateway])
+  @@index([status])
+  @@index([buyerEmail])
+  @@index([sku])
+  @@index([createdAt(sort: Desc)])
+  @@index([gatewayTransactionId])
+  @@map("orders")
+}
+
+model KpiDaily {
+  date            DateTime @id @db.Date
+  visitors        Int      @default(0)
+  leads           Int      @default(0)
+  orders          Int      @default(0)
+  grossGbp        Decimal  @default(0) @map("gross_gbp") @db.Decimal(10, 2)
+  netGbp          Decimal  @default(0) @map("net_gbp") @db.Decimal(10, 2)
+  refunds         Int      @default(0)
+  crPct           Decimal  @default(0) @map("cr_pct") @db.Decimal(5, 2)
+  
+  stripeOrders    Int      @default(0) @map("stripe_orders")
+  paypalOrders    Int      @default(0) @map("paypal_orders")
+  stripeGrossGbp  Decimal  @default(0) @map("stripe_gross_gbp") @db.Decimal(10, 2)
+  paypalGrossGbp  Decimal  @default(0) @map("paypal_gross_gbp") @db.Decimal(10, 2)
+  
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  
+  @@index([date(sort: Desc)])
+  @@map("kpi_daily")
+}
+
+model Subscription {
+  id                    String             @id @default(uuid()) @db.Uuid
+  gateway               PaymentGateway
+  gatewaySubscriptionId String             @unique @map("gateway_subscription_id") @db.VarChar(255)
+  customerEmail         String             @map("customer_email") @db.VarChar(255)
+  sku                   String             @db.VarChar(100)
+  status                SubscriptionStatus
+  
+  currentPeriodStart    DateTime?          @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd      DateTime?          @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd     Boolean            @default(false) @map("cancel_at_period_end")
+  
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cancelledAt           DateTime?          @map("cancelled_at") @db.Timestamptz(6)
+  
+  product               Product            @relation(fields: [sku], references: [sku])
+  
+  @@index([customerEmail])
+  @@index([status])
+  @@index([gatewaySubscriptionId])
+  @@map("subscriptions")
+}
+
+model ContentAsset {
+  id          String          @id @default(uuid()) @db.Uuid
+  type        ContentType
+  title       String?         @db.VarChar(500)
+  content     String?         @db.Text
+  fileUrl     String?         @map("file_url") @db.VarChar(1000)
+  metadata    Json?           @db.JsonB
+  
+  productSku  String?         @map("product_sku") @db.VarChar(100)
+  campaignId  String?         @map("campaign_id") @db.VarChar(100)
+  
+  published   Boolean         @default(false)
+  publishedAt DateTime?       @map("published_at") @db.Timestamptz(6)
+  
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  
+  product     Product?        @relation(fields: [productSku], references: [sku])
+  
+  @@index([type])
+  @@index([productSku])
+  @@index([published])
+  @@index([createdAt(sort: Desc)])
+  @@map("content_assets")
+}
+
+model EmailCampaign {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String    @db.VarChar(255)
+  subject         String?   @db.VarChar(500)
+  bodyHtml        String?   @map("body_html") @db.Text
+  bodyText        String?   @map("body_text") @db.Text
+  
+  segmentTags     String[]  @map("segment_tags")
+  
+  scheduledAt     DateTime? @map("scheduled_at") @db.Timestamptz(6)
+  sentAt          DateTime? @map("sent_at") @db.Timestamptz(6)
+  
+  recipientsCount Int       @default(0) @map("recipients_count")
+  opensCount      Int       @default(0) @map("opens_count")
+  clicksCount     Int       @default(0) @map("clicks_count")
+  conversionsCount Int      @default(0) @map("conversions_count")
+  
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  
+  @@index([scheduledAt])
+  @@index([sentAt])
+  @@map("email_campaigns")
+}
+
+model AutomationLog {
+  id             String           @id @default(uuid()) @db.Uuid
+  automationId   String           @map("automation_id") @db.VarChar(100)
+  automationName String?          @map("automation_name") @db.VarChar(255)
+  status         AutomationStatus
+  
+  triggerData    Json?            @map("trigger_data") @db.JsonB
+  executionData  Json?            @map("execution_data") @db.JsonB
+  errorMessage   String?          @map("error_message") @db.Text
+  
+  startedAt      DateTime         @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt    DateTime?        @map("completed_at") @db.Timestamptz(6)
+  durationMs     Int?             @map("duration_ms")
+  
+  @@index([automationId])
+  @@index([status])
+  @@index([startedAt(sort: Desc)])
+  @@map("automation_logs")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum LeadSource {
+  Typeform
+  Jotform
+  Webflow
+  Zapier
+  Manual
+}
+
+enum ProductType {
+  subscription
+  one_time
+  bundle
+}
+
+enum PaymentGateway {
+  stripe
+  paypal
+}
+
+enum OrderStatus {
+  paid
+  refunded
+  disputed
+  pending
+  failed
+}
+
+enum SubscriptionStatus {
+  active
+  cancelled
+  past_due
+  trialing
+  paused
+}
+
+enum ContentType {
+  article
+  email
+  audio
+  video
+  copy
+  ad_creative
+}
+
+enum AutomationStatus {
+  started
+  completed
+  failed
+  partial
+}
+

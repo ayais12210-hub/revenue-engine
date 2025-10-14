@@ -1,0 +1,201 @@
+{
+  "zapier_workflows": [
+    {
+      "id": "typeform-to-lead-intake",
+      "name": "Typeform Submission → Lead Intake",
+      "trigger": {
+        "app": "Typeform",
+        "event": "New Entry"
+      },
+      "actions": [
+        {
+          "step": 1,
+          "app": "Webhooks by Zapier",
+          "action": "POST",
+          "url": "https://your-api-domain.com/api/leads",
+          "method": "POST",
+          "headers": {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer YOUR_API_KEY"
+          },
+          "body": {
+            "email": "{{typeform.email}}",
+            "name": "{{typeform.name}}",
+            "source": "Typeform",
+            "tags": ["{{typeform.interest}}", "{{typeform.company_size}}"],
+            "utm_source": "{{typeform.utm_source}}",
+            "utm_campaign": "{{typeform.utm_campaign}}",
+            "utm_medium": "{{typeform.utm_medium}}",
+            "utm_term": "{{typeform.utm_term}}",
+            "utm_content": "{{typeform.utm_content}}"
+          }
+        },
+        {
+          "step": 2,
+          "app": "Supabase",
+          "action": "Insert Row",
+          "table": "leads",
+          "data": {
+            "email": "{{typeform.email}}",
+            "name": "{{typeform.name}}",
+            "source": "Typeform"
+          },
+          "conflict_handling": "upsert"
+        },
+        {
+          "step": 3,
+          "app": "Gmail",
+          "action": "Send Email",
+          "to": "{{typeform.email}}",
+          "subject": "Welcome to CopyKit!",
+          "body": "Hi {{typeform.name}},\n\nThanks for your interest in CopyKit...",
+          "from": "hello@copykit.io"
+        }
+      ]
+    },
+    {
+      "id": "jotform-to-lead-intake",
+      "name": "Jotform Submission → Lead Intake",
+      "trigger": {
+        "app": "Jotform",
+        "event": "New Submission"
+      },
+      "actions": [
+        {
+          "step": 1,
+          "app": "Webhooks by Zapier",
+          "action": "POST",
+          "url": "https://your-api-domain.com/api/leads",
+          "method": "POST",
+          "body": {
+            "email": "{{jotform.email}}",
+            "name": "{{jotform.name}}",
+            "source": "Jotform"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stripe-payment-to-fulfillment",
+      "name": "Stripe Payment → Fulfillment",
+      "trigger": {
+        "app": "Stripe",
+        "event": "New Payment"
+      },
+      "actions": [
+        {
+          "step": 1,
+          "app": "Webhooks by Zapier",
+          "action": "POST",
+          "url": "https://your-api-domain.com/webhooks/stripe",
+          "note": "This is handled by native Stripe webhooks, not Zapier"
+        }
+      ],
+      "note": "Stripe webhooks are handled natively by the API, not through Zapier"
+    },
+    {
+      "id": "new-subscriber-to-notion",
+      "name": "New Subscriber → Notion Customer Hub",
+      "trigger": {
+        "app": "Webhooks by Zapier",
+        "event": "Catch Hook",
+        "webhook_url": "https://hooks.zapier.com/hooks/catch/xxxxx/"
+      },
+      "actions": [
+        {
+          "step": 1,
+          "app": "Notion",
+          "action": "Create Database Item",
+          "database_id": "YOUR_NOTION_DATABASE_ID",
+          "properties": {
+            "Email": "{{webhook.customer_email}}",
+            "Name": "{{webhook.customer_name}}",
+            "Product": "{{webhook.product_sku}}",
+            "Status": "Active",
+            "Joined Date": "{{webhook.created_at}}"
+          }
+        },
+        {
+          "step": 2,
+          "app": "Gmail",
+          "action": "Send Email",
+          "to": "{{webhook.customer_email}}",
+          "subject": "Welcome to {{webhook.product_name}}!",
+          "body": "Your account is ready...",
+          "from": "hello@copykit.io"
+        }
+      ]
+    },
+    {
+      "id": "daily-briefing-to-subscribers",
+      "name": "Daily Briefing → Email Subscribers",
+      "trigger": {
+        "app": "Schedule by Zapier",
+        "event": "Every Day",
+        "time": "07:00 BST"
+      },
+      "actions": [
+        {
+          "step": 1,
+          "app": "Webhooks by Zapier",
+          "action": "POST",
+          "url": "https://your-api-domain.com/automations/daily-briefing",
+          "note": "Triggers the daily_briefing.py script"
+        }
+      ],
+      "note": "This can also be handled by cron jobs instead of Zapier"
+    },
+    {
+      "id": "new-order-to-accounting",
+      "name": "New Order → Accounting Spreadsheet",
+      "trigger": {
+        "app": "Webhooks by Zapier",
+        "event": "Catch Hook"
+      },
+      "actions": [
+        {
+          "step": 1,
+          "app": "Google Sheets",
+          "action": "Create Spreadsheet Row",
+          "spreadsheet": "Revenue Tracker 2025",
+          "worksheet": "Orders",
+          "data": {
+            "Date": "{{webhook.created_at}}",
+            "Order ID": "{{webhook.order_id}}",
+            "Customer Email": "{{webhook.customer_email}}",
+            "Product": "{{webhook.product_sku}}",
+            "Amount": "{{webhook.amount_gbp}}",
+            "Gateway": "{{webhook.gateway}}",
+            "Status": "{{webhook.status}}"
+          }
+        }
+      ]
+    }
+  ],
+  "webhook_endpoints": {
+    "lead_intake": "https://your-api-domain.com/api/leads",
+    "stripe_webhook": "https://your-api-domain.com/webhooks/stripe",
+    "paypal_webhook": "https://your-api-domain.com/webhooks/paypal",
+    "zapier_catch_hook": "https://hooks.zapier.com/hooks/catch/xxxxx/"
+  },
+  "setup_instructions": [
+    "1. Create a Zapier account and connect your apps (Typeform, Jotform, Stripe, PayPal, Gmail, Notion, Linear, Supabase)",
+    "2. For each workflow above, create a new Zap in Zapier",
+    "3. Configure the trigger according to the 'trigger' field",
+    "4. Add actions according to the 'actions' array",
+    "5. Replace placeholder values (YOUR_API_KEY, YOUR_NOTION_DATABASE_ID, etc.) with actual values",
+    "6. Test each Zap with sample data",
+    "7. Turn on the Zaps to activate automation"
+  ],
+  "alternative_to_zapier": {
+    "note": "You can also implement these workflows using:",
+    "options": [
+      "Native webhooks (Stripe, PayPal, Typeform, Jotform all support webhooks)",
+      "Cron jobs for scheduled tasks (daily briefing)",
+      "Custom API integrations in the Flask app",
+      "n8n (open-source Zapier alternative)",
+      "Make (formerly Integromat)"
+    ]
+  }
+}
+
