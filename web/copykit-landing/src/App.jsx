@@ -8,8 +8,8 @@ import './App.css'
 
 function App() {
   const [selectedPlan, setSelectedPlan] = useState(null)
-  const { products, loading: productsLoading, error: productsError } = useProducts()
-  const { analytics, loading: analyticsLoading } = useAnalytics()
+  const { products, loading: productsLoading } = useProducts()
+  const { analytics } = useAnalytics()
 
   const features = [
     {
@@ -116,7 +116,7 @@ function App() {
   const handleCheckout = (plan) => {
     setSelectedPlan(plan)
     // In production, this would redirect to Stripe/PayPal checkout
-    console.log('Checkout initiated for:', plan.sku)
+    console.log('Checkout initiated for:', plan.sku, 'Selected plan:', selectedPlan)
     alert(`Checkout for ${plan.name} - ${plan.sku}\n\nIn production, this would redirect to Stripe or PayPal checkout.`)
   }
 
