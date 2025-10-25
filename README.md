@@ -50,6 +50,32 @@ The system is built on a modern, decoupled architecture:
 
 ## Getting Started
 
+### Quick Start (Recommended)
+
+The easiest way to get started is using our automated setup script:
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd omni-revenue-agent
+
+# Run the setup script
+./scripts/setup.sh
+
+# Or with Docker Compose
+docker-compose up -d
+```
+
+The setup script will:
+- Check all prerequisites
+- Install dependencies
+- Set up the database
+- Build Docker images
+- Start all services
+- Run initial tests
+
+### Manual Setup
+
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18+)
@@ -92,6 +118,13 @@ The system is built on a modern, decoupled architecture:
     # Testing dependencies
     pip install -r tests/requirements.txt
     playwright install
+    ```
+
+4.  **Set up the database:**
+
+    ```bash
+    # Run database migrations
+    python scripts/migrate.py
     ```
 
 ---
@@ -175,7 +208,7 @@ The Flask API is the core of the system, handling webhooks and fulfillment.
 
 ## Frontend Setup
 
-The React landing page is built with Vite.
+The React landing page is built with Vite and includes a comprehensive monitoring dashboard.
 
 1.  **Navigate to the project directory:**
 
@@ -196,6 +229,19 @@ The React landing page is built with Vite.
     ```
 
     The frontend will be available at `http://localhost:5173`.
+
+### Monitoring Dashboard
+
+Access the real-time monitoring dashboard at `http://localhost:3000/dashboard` to view:
+
+- **System Health**: Database, Stripe, and API status
+- **Revenue Metrics**: Real-time revenue and order tracking
+- **Conversion Analytics**: Lead-to-order conversion rates
+- **Performance Charts**: Interactive revenue and traffic charts
+- **Recent Orders**: Live order feed with status updates
+- **KPI Trends**: Historical performance data
+
+The dashboard automatically refreshes every 30 seconds and provides comprehensive insights into your revenue engine performance.
 
 ---
 
@@ -313,6 +359,45 @@ Create a `.env` file in the root directory and add the following variables. See 
 | `LINEAR_API_KEY`              | API key for Linear integration.                              |
 | `NOTION_CRM_DATABASE_ID`      | ID of the Notion database for CRM records.                   |
 | `LINEAR_TEAM_ID`              | ID of the Linear team for creating tasks.                    |
+
+---
+
+## 🚀 New Features & Enhancements
+
+### Enhanced Security
+- **Rate Limiting**: Comprehensive rate limiting with Redis backend
+- **Input Validation**: Advanced input sanitization and validation
+- **CORS Configuration**: Secure cross-origin resource sharing
+- **API Key Authentication**: Secure API endpoints with key-based auth
+- **Webhook Verification**: Enhanced Stripe and PayPal webhook security
+
+### Monitoring & Analytics
+- **Real-time Dashboard**: Comprehensive monitoring dashboard with live metrics
+- **Health Checks**: Detailed system health monitoring
+- **Performance Metrics**: Request timing and error tracking
+- **Revenue Analytics**: Advanced KPI tracking and visualization
+- **Automated Alerts**: Sentry integration for error monitoring
+
+### Database Management
+- **Migration System**: Automated database migration runner
+- **Seed Data**: Pre-populated sample data for testing
+- **Performance Indexes**: Optimized database queries
+- **Analytics Views**: Pre-built views for common queries
+- **Data Validation**: Comprehensive data integrity checks
+
+### Development Experience
+- **Docker Compose**: One-command local development setup
+- **Hot Reloading**: Automatic code reloading in development
+- **Comprehensive Logging**: Structured logging throughout the system
+- **API Documentation**: Complete API documentation with examples
+- **Setup Scripts**: Automated environment setup and configuration
+
+### Production Ready
+- **Error Handling**: Comprehensive error handling and recovery
+- **Graceful Degradation**: System continues working when services fail
+- **Scalability**: Designed for horizontal scaling
+- **Monitoring**: Built-in health checks and metrics
+- **Security**: Production-grade security features
 
 ---
 
