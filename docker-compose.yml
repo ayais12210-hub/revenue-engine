@@ -1,0 +1,173 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: revenue-engine-db
+    environment:
+      POSTGRES_DB: revenue_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
+      - ./database/migrations:/docker-entrypoint-initdb.d/migrations
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: revenue-engine-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Flask API Backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: revenue-engine-api
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/revenue_engine
+      - REDIS_URL=redis://redis:6379
+      - FLASK_ENV=development
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - COHERE_API_KEY=${COHERE_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - INVIDEO_API_KEY=${INVIDEO_API_KEY}
+      - POLYGON_API_KEY=${POLYGON_API_KEY}
+      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
+      - EXPLORIUM_API_KEY=${EXPLORIUM_API_KEY}
+      - NOTION_API_KEY=${NOTION_API_KEY}
+      - LINEAR_API_KEY=${LINEAR_API_KEY}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - ENVIRONMENT=development
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api:/app/api
+      - ./scripts:/app/scripts
+    command: >
+      sh -c "
+        echo 'Waiting for database to be ready...' &&
+        sleep 10 &&
+        echo 'Running database migrations...' &&
+        python scripts/migrate.py &&
+        echo 'Starting Flask application...' &&
+        python api/app.py
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./web/copykit-landing
+      dockerfile: Dockerfile
+    container_name: revenue-engine-frontend
+    environment:
+      - VITE_API_URL=http://localhost:5000
+      - VITE_COPYKIT_URL=https://copykit-gv4rmq.manus.space
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    volumes:
+      - ./web/copykit-landing:/app
+      - /app/node_modules
+    command: >
+      sh -c "
+        echo 'Installing dependencies...' &&
+        pnpm install &&
+        echo 'Starting development server...' &&
+        pnpm run dev --host 0.0.0.0
+      "
+
+  # Nginx Reverse Proxy (for production-like setup)
+  nginx:
+    image: nginx:alpine
+    container_name: revenue-engine-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - api
+      - frontend
+    profiles:
+      - production
+
+  # Monitoring with Prometheus (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: revenue-engine-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    profiles:
+      - monitoring
+
+  # Grafana for dashboards (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: revenue-engine-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: revenue-engine-network

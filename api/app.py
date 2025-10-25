@@ -7,49 +7,180 @@ import os
 import json
 import hmac
 import hashlib
+import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Any, Optional
+from functools import wraps
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import stripe
 import requests
 from prisma import Prisma
 from api.utils.copykit_parser import parse_copykit_html
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+
+# Configure CORS with specific origins for security
+CORS(app, origins=[
+    os.getenv('FRONTEND_URL', 'http://localhost:3000'),
+    os.getenv('BASE_URL', 'http://localhost:3000'),
+    'https://copykit.io',
+    'https://www.copykit.io'
+], allow_headers=['Content-Type', 'Authorization'], methods=['GET', 'POST', 'PUT', 'DELETE'])
+
+# Initialize rate limiter
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["1000 per hour", "100 per minute"]
+)
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.config['JSON_SORT_KEYS'] = False  # Preserve JSON key order
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+
+# Initialize Sentry for error monitoring
+if os.getenv('SENTRY_DSN'):
+    sentry_sdk.init(
+        dsn=os.getenv('SENTRY_DSN'),
+        integrations=[FlaskIntegration()],
+        traces_sample_rate=0.1,
+        environment=os.getenv('ENVIRONMENT', 'development')
+    )
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Initialize Prisma client
 db = Prisma()
+
+# ============================================================
+# SECURITY & VALIDATION UTILITIES
+# ============================================================
+
+def validate_email(email: str) -> bool:
+    """Validate email format"""
+    import re
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+def sanitize_input(data: Any) -> Any:
+    """Sanitize input data to prevent XSS and injection attacks"""
+    if isinstance(data, str):
+        # Remove potentially dangerous characters
+        return data.replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#x27;')
+    elif isinstance(data, dict):
+        return {k: sanitize_input(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [sanitize_input(item) for item in data]
+    return data
+
+def require_api_key(f):
+    """Decorator to require API key for sensitive endpoints"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')
+        expected_key = os.getenv('API_KEY')
+        
+        if not expected_key:
+            logger.warning("API_KEY not configured, skipping API key validation")
+            return f(*args, **kwargs)
+            
+        if not api_key or api_key != expected_key:
+            return jsonify({'error': 'Invalid or missing API key'}), 401
+            
+        return f(*args, **kwargs)
+    return decorated_function
+
+def validate_json_schema(schema: Dict):
+    """Decorator to validate JSON request body against schema"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not request.is_json:
+                return jsonify({'error': 'Request must be JSON'}), 400
+                
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'Empty JSON body'}), 400
+                
+            # Basic schema validation
+            for field, field_type in schema.items():
+                if field not in data:
+                    return jsonify({'error': f'Missing required field: {field}'}), 400
+                if not isinstance(data[field], field_type):
+                    return jsonify({'error': f'Invalid type for field {field}, expected {field_type.__name__}'}), 400
+                    
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+def log_request(f):
+    """Decorator to log API requests"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        start_time = datetime.utcnow()
+        logger.info(f"Request: {request.method} {request.path} from {request.remote_addr}")
+        
+        try:
+            result = f(*args, **kwargs)
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            logger.info(f"Response: {request.method} {request.path} - {duration:.3f}s")
+            return result
+        except Exception as e:
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            logger.error(f"Error: {request.method} {request.path} - {duration:.3f}s - {str(e)}")
+            raise
+    return decorated_function
 
 # ============================================================
 # UTILITY FUNCTIONS
 # ============================================================
 
 def verify_stripe_signature(payload: bytes, sig_header: str) -> bool:
-    """Verify Stripe webhook signature"""
+    """Verify Stripe webhook signature with enhanced security"""
     webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
     if not webhook_secret:
-        return True  # Skip verification in development
+        logger.warning("STRIPE_WEBHOOK_SECRET not configured, skipping verification")
+        return os.getenv('ENVIRONMENT') == 'development'
     
     try:
+        # Verify signature using Stripe's official method
         stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        logger.info("Stripe webhook signature verified successfully")
         return True
+    except ValueError as e:
+        logger.error(f"Stripe signature verification failed - Invalid payload: {e}")
+        return False
+    except stripe.error.SignatureVerificationError as e:
+        logger.error(f"Stripe signature verification failed - Invalid signature: {e}")
+        return False
     except Exception as e:
-        app.logger.error(f"Stripe signature verification failed: {e}")
+        logger.error(f"Stripe signature verification failed - Unexpected error: {e}")
         return False
 
 def verify_paypal_signature(payload: Dict, headers: Dict) -> bool:
-    """Verify PayPal webhook signature"""
-    # Implement PayPal webhook verification
-    # For production, use PayPal SDK verification
+    """Verify PayPal webhook signature with enhanced security"""
+    # In production, implement proper PayPal webhook verification
+    # This is a placeholder implementation
+    if os.getenv('ENVIRONMENT') == 'production':
+        logger.warning("PayPal webhook verification not fully implemented for production")
+        return False
+    
+    # For development, allow all PayPal webhooks
+    logger.info("PayPal webhook received (development mode - signature not verified)")
     return True
 
 def log_automation(automation_id: str, automation_name: str, status: str, 
@@ -97,25 +228,73 @@ def create_notion_workspace(customer_email: str, product_sku: str) -> str:
 # ============================================================
 
 @app.route('/health', methods=['GET'])
+@log_request
 def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': datetime.utcnow().isoformat(),
-        'service': 'omni-revenue-agent-api'
-    }), 200
+    """Comprehensive health check endpoint"""
+    try:
+        # Check database connectivity
+        db_status = 'healthy'
+        try:
+            db.connect()
+            # Simple query to test connection
+            db.lead.count()
+            db.disconnect()
+        except Exception as e:
+            db_status = 'unhealthy'
+            logger.error(f"Database health check failed: {e}")
+        
+        # Check external services
+        stripe_status = 'healthy'
+        try:
+            stripe.Account.retrieve()
+        except Exception as e:
+            stripe_status = 'unhealthy'
+            logger.error(f"Stripe health check failed: {e}")
+        
+        # Overall status
+        overall_status = 'healthy' if db_status == 'healthy' and stripe_status == 'healthy' else 'degraded'
+        
+        return jsonify({
+            'status': overall_status,
+            'timestamp': datetime.utcnow().isoformat(),
+            'service': 'omni-revenue-agent-api',
+            'version': os.getenv('RELEASE', '1.0.0'),
+            'environment': os.getenv('ENVIRONMENT', 'development'),
+            'checks': {
+                'database': db_status,
+                'stripe': stripe_status
+            },
+            'uptime': (datetime.utcnow() - datetime.utcnow()).total_seconds()  # Placeholder
+        }), 200 if overall_status == 'healthy' else 503
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            'status': 'unhealthy',
+            'timestamp': datetime.utcnow().isoformat(),
+            'service': 'omni-revenue-agent-api',
+            'error': str(e)
+        }), 503
 
 # ============================================================
 # STRIPE WEBHOOKS
 # ============================================================
 
 @app.route('/webhooks/stripe', methods=['POST'])
+@limiter.limit("10 per minute")  # Rate limit webhook endpoints
+@log_request
 def stripe_webhook():
-    """Handle Stripe webhook events"""
+    """Handle Stripe webhook events with enhanced security"""
     payload = request.get_data()
     sig_header = request.headers.get('Stripe-Signature')
     
+    # Validate content type
+    if request.content_type != 'application/json':
+        logger.warning(f"Invalid content type for Stripe webhook: {request.content_type}")
+        return jsonify({'error': 'Invalid content type'}), 400
+    
     if not verify_stripe_signature(payload, sig_header):
+        logger.warning(f"Stripe webhook signature verification failed from {request.remote_addr}")
         return jsonify({'error': 'Invalid signature'}), 401
     
     event = json.loads(payload)
@@ -315,12 +494,20 @@ def handle_stripe_dispute(charge: Dict):
 # ============================================================
 
 @app.route('/webhooks/paypal', methods=['POST'])
+@limiter.limit("10 per minute")  # Rate limit webhook endpoints
+@log_request
 def paypal_webhook():
-    """Handle PayPal webhook events"""
+    """Handle PayPal webhook events with enhanced security"""
     payload = request.get_json()
     headers = request.headers
     
+    # Validate content type
+    if request.content_type != 'application/json':
+        logger.warning(f"Invalid content type for PayPal webhook: {request.content_type}")
+        return jsonify({'error': 'Invalid content type'}), 400
+    
     if not verify_paypal_signature(payload, headers):
+        logger.warning(f"PayPal webhook signature verification failed from {request.remote_addr}")
         return jsonify({'error': 'Invalid signature'}), 401
     
     event_type = payload.get('event_type')
@@ -608,15 +795,41 @@ def api_fulfill_briefing():
 # ============================================================
 
 @app.route('/api/leads', methods=['POST'])
+@limiter.limit("20 per minute")  # Rate limit lead creation
+@validate_json_schema({'email': str})
+@log_request
 def create_lead():
-    """Create a new lead"""
+    """Create a new lead with enhanced validation and security"""
     data = request.get_json()
     
+    # Sanitize input data
+    data = sanitize_input(data)
+    
+    # Validate email format
+    if not validate_email(data['email']):
+        logger.warning(f"Invalid email format provided: {data['email']}")
+        return jsonify({'error': 'Invalid email format'}), 400
+    
+    # Validate name if provided
+    if 'name' in data and data['name']:
+        if len(data['name']) > 255:
+            return jsonify({'error': 'Name too long (max 255 characters)'}), 400
+    
     try:
+        # Check if lead already exists
+        existing_lead = db.lead.find_unique(where={'email': data['email']})
+        if existing_lead:
+            logger.info(f"Lead already exists: {data['email']}")
+            return jsonify({
+                'message': 'Lead already exists',
+                'lead': existing_lead.dict()
+            }), 200
+        
+        # Create new lead
         lead = db.lead.create(
             data={
-                'email': data['email'],
-                'name': data.get('name'),
+                'email': data['email'].lower().strip(),  # Normalize email
+                'name': data.get('name', '').strip() if data.get('name') else None,
                 'source': data.get('source', 'Manual'),
                 'tags': data.get('tags', []),
                 'utmSource': data.get('utm_source'),
@@ -627,10 +840,12 @@ def create_lead():
             }
         )
         
+        logger.info(f"New lead created: {lead.email} from {lead.source}")
         return jsonify(lead.dict()), 201
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        logger.error(f"Error creating lead: {e}")
+        return jsonify({'error': 'Failed to create lead'}), 500
 
 # ============================================================
 # COPYKIT DATA FETCHING
@@ -809,7 +1024,79 @@ def shutdown(exception=None):
     if db.is_connected():
         db.disconnect()
 
+# ============================================================
+# ERROR HANDLERS
+# ============================================================
+
+@app.errorhandler(400)
+def bad_request(error):
+    """Handle 400 Bad Request errors"""
+    return jsonify({
+        'error': 'Bad Request',
+        'message': 'Invalid request data',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 400
+
+@app.errorhandler(401)
+def unauthorized(error):
+    """Handle 401 Unauthorized errors"""
+    return jsonify({
+        'error': 'Unauthorized',
+        'message': 'Authentication required',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 401
+
+@app.errorhandler(403)
+def forbidden(error):
+    """Handle 403 Forbidden errors"""
+    return jsonify({
+        'error': 'Forbidden',
+        'message': 'Access denied',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 403
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 Not Found errors"""
+    return jsonify({
+        'error': 'Not Found',
+        'message': 'Resource not found',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 404
+
+@app.errorhandler(429)
+def rate_limit_exceeded(error):
+    """Handle 429 Rate Limit Exceeded errors"""
+    return jsonify({
+        'error': 'Rate Limit Exceeded',
+        'message': 'Too many requests, please try again later',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 429
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 Internal Server errors"""
+    logger.error(f"Internal server error: {error}")
+    return jsonify({
+        'error': 'Internal Server Error',
+        'message': 'An unexpected error occurred',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 500
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    """Handle all unhandled exceptions"""
+    logger.error(f"Unhandled exception: {error}")
+    return jsonify({
+        'error': 'Internal Server Error',
+        'message': 'An unexpected error occurred',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 500
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=os.getenv('FLASK_ENV') == 'development')
+    debug_mode = os.getenv('FLASK_ENV') == 'development'
+    
+    logger.info(f"Starting Omni-Revenue-Agent API on port {port} (debug={debug_mode})")
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
 
